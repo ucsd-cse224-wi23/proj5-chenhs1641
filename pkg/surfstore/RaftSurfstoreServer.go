@@ -2,7 +2,7 @@ package surfstore
 
 import (
 	context "context"
-	// "fmt"
+	//"fmt"
 	"google.golang.org/grpc"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	"sync"
@@ -160,9 +160,11 @@ func (s *RaftSurfstore) UpdateFile(ctx context.Context, filemeta *FileMetaData) 
 		FileMetaData: filemeta,
 	})
 	commitChan := make(chan bool)
-	s.pendingCommits = append(s.pendingCommits, &commitChan)
+	// s.pendingCommits = append(s.pendingCommits, &commitChan)
+	// fmt.Println(s.id, s.commitIndex, len(s.pendingCommits))
+	// fmt.Println("now I'm doing append pending commit")
 	// send entry to all followers in parallel
-	go s.sendToAllFollowersInParallel(ctx)
+	go s.sendToAllFollowersInParallel(ctx, commitChan)
 	// keep trying indefinitely (even after responding) ** rely on sendheartbeat
 
 	// commit the entry once majority of followers have it in their log
@@ -192,7 +194,7 @@ func (s *RaftSurfstore) UpdateFile(ctx context.Context, filemeta *FileMetaData) 
 	return nil, nil
 }
 
-func (s *RaftSurfstore) sendToAllFollowersInParallel(ctx context.Context) {
+func (s *RaftSurfstore) sendToAllFollowersInParallel(ctx context.Context, commitChan chan bool) {
 	// send entry to all my followers and count the replies
 	responses := make(chan bool, len(s.peers)-1)
 	for idx, addr := range s.peers {
@@ -211,7 +213,8 @@ func (s *RaftSurfstore) sendToAllFollowersInParallel(ctx context.Context) {
 		}
 		if totalAppends > len(s.peers)/2 {
 			s.commitIndex = newCommitIndex
-			*s.pendingCommits[s.commitIndex] <- true
+			//*s.pendingCommits[s.commitIndex] <- true
+			commitChan <- true
 			//fmt.Println("I'm leader, and my commit index has been modified to")
 			//fmt.Println(s.commitIndex)
 			break
