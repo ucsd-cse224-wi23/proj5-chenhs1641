@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"google.golang.org/grpc"
 	"io"
 	"log"
 	"net"
 	"os"
 	"sync"
+
+	"google.golang.org/grpc"
 )
 
 type RaftConfig struct {
@@ -40,6 +41,7 @@ func NewRaftServer(id int64, config RaftConfig) (*RaftSurfstore, error) {
 
 	isLeaderMutex := sync.RWMutex{}
 	isCrashedMutex := sync.RWMutex{}
+	logMutex := sync.RWMutex{}
 
 	server := RaftSurfstore{
 		isLeader:       false,
@@ -55,6 +57,7 @@ func NewRaftServer(id int64, config RaftConfig) (*RaftSurfstore, error) {
 		pendingCommits: make([]*chan bool, 0),
 		commitIndex:    -1,
 		lastApplied:    -1,
+		logMutex:       &logMutex,
 	}
 
 	return &server, nil

@@ -1,9 +1,11 @@
 package SurfTest
 
 import (
+	"time"
 	// "cse224/proj5/pkg/surfstore"
-	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	"testing"
+
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 func TestRaft2(t *testing.T) {
@@ -18,8 +20,8 @@ func TestRaft2(t *testing.T) {
 
 	worker1 := InitDirectoryWorker("test0", SRC_PATH)
 	worker2 := InitDirectoryWorker("test1", SRC_PATH)
-	defer worker1.CleanUp()
-	defer worker2.CleanUp()
+	//defer worker1.CleanUp()
+	//defer worker2.CleanUp()
 
 	//clients add different files
 	file1 := "multi_file1.txt"
@@ -50,8 +52,12 @@ func TestRaft2(t *testing.T) {
 
 	test.Clients[0].SendHeartbeat(test.Context, &emptypb.Empty{})
 	//client1 syncs
-	go SyncClient("localhost:8080", "test0", BLOCK_SIZE, cfgPath)
+	go SyncClient("localhost:8080", "test1", BLOCK_SIZE, cfgPath)
 	test.Clients[1].Restore(test.Context, &emptypb.Empty{})
 	test.Clients[2].Restore(test.Context, &emptypb.Empty{})
+	test.Clients[0].SendHeartbeat(test.Context, &emptypb.Empty{})
 
+	time.Sleep(1 * time.Second)
+	SyncClient("localhost:8080", "test0", BLOCK_SIZE, cfgPath)
+	time.Sleep(2 * time.Second)
 }

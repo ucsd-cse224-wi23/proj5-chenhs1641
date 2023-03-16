@@ -2,11 +2,11 @@ package surfstore
 
 import (
 	context "context"
-	//"fmt"
-	"google.golang.org/grpc"
-	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	"sync"
 	"time"
+
+	"google.golang.org/grpc"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 // TODO Add fields you need here
@@ -27,6 +27,7 @@ type RaftSurfstore struct {
 	// self
 	nextIndex  []int
 	matchIndex []int
+	logMutex   *sync.RWMutex
 
 	/*--------------- Chaos Monkey --------------*/
 	isCrashed      bool
@@ -157,15 +158,13 @@ func (s *RaftSurfstore) UpdateFile(ctx context.Context, filemeta *FileMetaData) 
 		return nil, ERR_NOT_LEADER
 	}
 	// append entry to our log
-	//fmt.Println(s.peers[s.id] + string(filemeta.BlockHashList[0]))
+	s.logMutex.Lock()
 	s.log = append(s.log, &UpdateOperation{
 		Term:         s.term,
 		FileMetaData: filemeta,
 	})
+	s.logMutex.Unlock()
 	commitChan := make(chan bool)
-	// s.pendingCommits = append(s.pendingCommits, &commitChan)
-	// fmt.Println(s.id, s.commitIndex, len(s.pendingCommits))
-	// fmt.Println("now I'm doing append pending commit")
 	// send entry to all followers in parallel
 	go s.sendToAllFollowersInParallel(ctx, commitChan)
 	// keep trying indefinitely (even after responding) ** rely on sendheartbeat
@@ -173,7 +172,6 @@ func (s *RaftSurfstore) UpdateFile(ctx context.Context, filemeta *FileMetaData) 
 	// commit the entry once majority of followers have it in their log
 	totalCommit := 1
 	for {
-		//fmt.Println("now waiting commit")
 		commit := <-commitChan
 		// once commited, apply to the state machine
 		if commit {
@@ -181,19 +179,9 @@ func (s *RaftSurfstore) UpdateFile(ctx context.Context, filemeta *FileMetaData) 
 		}
 		if totalCommit > len(s.peers)/2 {
 			s.lastApplied = s.commitIndex
-			//fmt.Println("Yes!")
 			return s.metaStore.UpdateFile(ctx, filemeta)
-			// break
 		}
 	}
-	/*
-		for totalCommit < len(s.peers) {
-			commit := <-commitChan
-			if commit {
-				totalCommit++
-			}
-		}
-	*/
 	return nil, nil
 }
 
@@ -216,10 +204,7 @@ func (s *RaftSurfstore) sendToAllFollowersInParallel(ctx context.Context, commit
 		}
 		if totalAppends > len(s.peers)/2 {
 			s.commitIndex = newCommitIndex
-			//*s.pendingCommits[s.commitIndex] <- true
 			commitChan <- true
-			//fmt.Println("I'm leader, and my commit index has been modified to")
-			//fmt.Println(s.commitIndex)
 			break
 		}
 	}
@@ -336,6 +321,7 @@ func (s *RaftSurfstore) AppendEntries(ctx context.Context, input *AppendEntryInp
 		}
 		// success
 		output.Success = true
+		s.logMutex.Lock()
 		// 3
 		for idx, existingEntry := range s.log {
 			if existingEntry.Term != input.Entries[idx].Term {
@@ -354,6 +340,7 @@ func (s *RaftSurfstore) AppendEntries(ctx context.Context, input *AppendEntryInp
 			s.log = append(s.log, input.Entries[idx])
 			//lastNewIndex = idx
 		}
+		s.logMutex.Unlock()
 		output.MatchedIndex = int64(len(input.Entries) - 1)
 	}
 
