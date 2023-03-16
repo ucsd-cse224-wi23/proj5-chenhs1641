@@ -24,6 +24,9 @@ type RaftSurfstore struct {
 	pendingCommits []*chan bool
 	commitIndex    int64
 	lastApplied    int64
+	// self
+	nextIndex  []int
+	matchIndex []int
 
 	/*--------------- Chaos Monkey --------------*/
 	isCrashed      bool
@@ -303,6 +306,8 @@ func (s *RaftSurfstore) AppendEntries(ctx context.Context, input *AppendEntryInp
 		if input.PrevLogIndex != -1 && s.log[input.PrevLogIndex].Term != input.PrevLogTerm {
 			return output, nil
 		}
+		// success
+		output.Success = true
 		// 3
 		for idx, existingEntry := range s.log {
 			if existingEntry.Term != input.Entries[idx].Term {
@@ -355,13 +360,23 @@ func (s *RaftSurfstore) SetLeader(ctx context.Context, _ *emptypb.Empty) (*Succe
 	s.isLeader = true
 	s.term++
 	s.isLeaderMutex.Unlock()
-	return nil, nil
+	s.nextIndex = make([]int, len(s.peers))
+	s.matchIndex = make([]int, len(s.peers))
+
+	for idx := range s.peers {
+		s.nextIndex[idx] = len(s.log) - 1
+		s.matchIndex[idx] = -1
+	}
+	return &Success{Flag: true}, nil
 }
 
 func (s *RaftSurfstore) SendHeartbeat(ctx context.Context, _ *emptypb.Empty) (*Success, error) {
 	//panic("todo")
 	if s.isCrashed {
 		return nil, ERR_SERVER_CRASHED
+	}
+	if !s.isLeader {
+		return nil, ERR_NOT_LEADER
 	}
 	dummyAppendEntryInput := AppendEntryInput{
 		Term:         s.term,
@@ -378,14 +393,27 @@ func (s *RaftSurfstore) SendHeartbeat(ctx context.Context, _ *emptypb.Empty) (*S
 		if int64(idx) == s.id {
 			continue
 		}
-
+		//dummyAppendEntryInput.PrevLogIndex = int64(s.nextIndex[idx])
+		//dummyAppendEntryInput.PrevLogTerm = s.log[int(s.nextIndex[idx])].Term
 		conn, _ := grpc.Dial(addr, grpc.WithInsecure())
 		client := NewRaftSurfstoreClient(conn)
 
-		_, _ = client.AppendEntries(ctx, &dummyAppendEntryInput)
-
+		output, err := client.AppendEntries(ctx, &dummyAppendEntryInput)
+		if err == nil {
+			if output.Success {
+				s.nextIndex[idx] = len(s.log)
+				s.matchIndex[idx] = len(s.log) - 1
+			} else if output.Term > s.term {
+				s.isLeaderMutex.Lock()
+				s.isLeader = false
+				s.term = output.Term
+				s.isLeaderMutex.Unlock()
+			} else {
+				s.nextIndex[idx] = int(output.MatchedIndex)
+			}
+		}
 	}
-	return nil, nil
+	return &Success{Flag: true}, nil
 }
 
 // ========== DO NOT MODIFY BELOW THIS LINE =====================================
