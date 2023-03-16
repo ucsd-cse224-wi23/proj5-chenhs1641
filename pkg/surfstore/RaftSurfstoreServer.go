@@ -6,6 +6,7 @@ import (
 	"google.golang.org/grpc"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	"sync"
+	"time"
 )
 
 // TODO Add fields you need here
@@ -39,8 +40,24 @@ func (s *RaftSurfstore) GetFileInfoMap(ctx context.Context, empty *emptypb.Empty
 	if !s.isLeader {
 		return nil, ERR_NOT_LEADER
 	}
-	return s.metaStore.GetFileInfoMap(ctx, empty)
-	// return nil, nil
+	responses := make(chan bool, len(s.peers)-1)
+	totalGet := 1
+	for idx, addr := range s.peers {
+		if int64(idx) == s.id {
+			continue
+		}
+		go s.checkAlive(addr, responses)
+	}
+	for {
+		success := <-responses
+		if success {
+			totalGet++
+		}
+		if totalGet > len(s.peers)/2 {
+			return s.metaStore.GetFileInfoMap(ctx, empty)
+		}
+	}
+	return nil, nil
 }
 
 func (s *RaftSurfstore) GetBlockStoreMap(ctx context.Context, hashes *BlockHashes) (*BlockStoreMap, error) {
@@ -52,8 +69,24 @@ func (s *RaftSurfstore) GetBlockStoreMap(ctx context.Context, hashes *BlockHashe
 	if !s.isLeader {
 		return nil, ERR_NOT_LEADER
 	}
-	return s.metaStore.GetBlockStoreMap(ctx, hashes)
-	// return nil, nil
+	responses := make(chan bool, len(s.peers)-1)
+	totalGet := 1
+	for idx, addr := range s.peers {
+		if int64(idx) == s.id {
+			continue
+		}
+		go s.checkAlive(addr, responses)
+	}
+	for {
+		success := <-responses
+		if success {
+			totalGet++
+		}
+		if totalGet > len(s.peers)/2 {
+			return s.metaStore.GetBlockStoreMap(ctx, hashes)
+		}
+	}
+	return nil, nil
 }
 
 func (s *RaftSurfstore) GetBlockStoreAddrs(ctx context.Context, empty *emptypb.Empty) (*BlockStoreAddrs, error) {
@@ -65,38 +98,56 @@ func (s *RaftSurfstore) GetBlockStoreAddrs(ctx context.Context, empty *emptypb.E
 	if !s.isLeader {
 		return nil, ERR_NOT_LEADER
 	}
-	/*
-		responses := make(chan int64, len(s.peers)-1)
-		totalGet := 1
-		for idx, addr := range s.peers {
-			if int64(idx) == s.id {
-				continue
-			}
-			go s.check(addr, responses)
+	responses := make(chan bool, len(s.peers)-1)
+	totalGet := 1
+	for idx, addr := range s.peers {
+		if int64(idx) == s.id {
+			continue
 		}
-		prevTerm := int64(0)
-		for {
-			var returnValue *BlockStoreAddrs
-			var returnErr error
-			term := <-responses
-			if term > 0 {
-				totalGet++
-				if term > prevTerm {
-					prevTerm = term
-					returnValue, returnErr = s.metaStore.GetBlockStoreAddrs(ctx, empty)
-				}
-			}
-			if totalGet > len(s.peers)/2 {
-				return returnValue, returnErr
-			}
+		go s.checkAlive(addr, responses)
+	}
+	for {
+		success := <-responses
+		if success {
+			totalGet++
 		}
-	*/
-	return s.metaStore.GetBlockStoreAddrs(ctx, empty)
-	// return nil, nil
+		if totalGet > len(s.peers)/2 {
+			return s.metaStore.GetBlockStoreAddrs(ctx, empty)
+		}
+	}
+	return nil, nil
+}
+
+func (s *RaftSurfstore) checkAlive(addr string, responses chan bool) {
+	for {
+		conn, err := grpc.Dial(addr, grpc.WithInsecure())
+		if err != nil {
+			continue
+		}
+		client := NewRaftSurfstoreClient(conn)
+		dummyAppendEntryInput := &AppendEntryInput{
+			Term:         s.term,
+			PrevLogTerm:  -1,
+			PrevLogIndex: -1,
+			Entries:      make([]*UpdateOperation, 0),
+			LeaderCommit: s.commitIndex,
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_, err = client.AppendEntries(ctx, dummyAppendEntryInput)
+		if err != nil {
+			continue
+		} else {
+			responses <- true
+			return
+		}
+	}
 }
 
 func (s *RaftSurfstore) UpdateFile(ctx context.Context, filemeta *FileMetaData) (*Version, error) {
 	//panic("todo")
+	//fmt.Println("enter update file")
 	if s.isCrashed {
 		return nil, ERR_SERVER_CRASHED
 	}
@@ -118,6 +169,7 @@ func (s *RaftSurfstore) UpdateFile(ctx context.Context, filemeta *FileMetaData) 
 	// commit the entry once majority of followers have it in their log
 	totalCommit := 1
 	for {
+		//fmt.Println("now waiting commit")
 		commit := <-commitChan
 		// once commited, apply to the state machine
 		if commit {
@@ -167,6 +219,8 @@ func (s *RaftSurfstore) sendToAllFollowersInParallel(ctx context.Context) {
 		}
 	}
 
+	//fmt.Println("get so much responses, this should not happend")
+
 	for totalAppends < len(s.peers) {
 		res := <-responses
 		if res {
@@ -192,10 +246,12 @@ func (s *RaftSurfstore) sendToFollower(ctx context.Context, addr string, respons
 	client := NewRaftSurfstoreClient(conn)
 
 	_, err := client.AppendEntries(ctx, &realAppendEntryInput)
-	for err == ERR_SERVER_CRASHED {
-		_, err = client.AppendEntries(ctx, &realAppendEntryInput)
+	conn.Close()
+
+	if err == nil {
+		//fmt.Println("append success and return resp")
+		responses <- true
 	}
-	responses <- true
 }
 
 // 1. Reply false if term < currentTerm (§5.1)
@@ -209,6 +265,7 @@ func (s *RaftSurfstore) sendToFollower(ctx context.Context, addr string, respons
 func (s *RaftSurfstore) AppendEntries(ctx context.Context, input *AppendEntryInput) (*AppendEntryOutput, error) {
 	//panic("todo")
 	if s.isCrashed {
+		//fmt.Println("here should crash")
 		return nil, ERR_SERVER_CRASHED
 	}
 
