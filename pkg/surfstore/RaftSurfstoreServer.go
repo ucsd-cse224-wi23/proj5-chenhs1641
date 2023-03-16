@@ -2,7 +2,7 @@ package surfstore
 
 import (
 	context "context"
-	//"fmt"
+	// "fmt"
 	"google.golang.org/grpc"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	"sync"
@@ -136,9 +136,8 @@ func (s *RaftSurfstore) checkAlive(addr string, responses chan bool) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		_, err = client.AppendEntries(ctx, dummyAppendEntryInput)
-		if err != nil {
-			continue
-		} else {
+		conn.Close()
+		if err == nil {
 			responses <- true
 			return
 		}

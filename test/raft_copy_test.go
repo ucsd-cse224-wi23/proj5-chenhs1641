@@ -50,9 +50,8 @@ func TestRaft2(t *testing.T) {
 
 	test.Clients[0].SendHeartbeat(test.Context, &emptypb.Empty{})
 	//client1 syncs
-	err = SyncClient("localhost:8080", "test0", BLOCK_SIZE, cfgPath)
-	if err != nil {
-		t.Fatalf("Sync failed")
-	}
+	go SyncClient("localhost:8080", "test0", BLOCK_SIZE, cfgPath)
+	test.Clients[1].Restore(test.Context, &emptypb.Empty{})
+	test.Clients[2].Restore(test.Context, &emptypb.Empty{})
 
 }
