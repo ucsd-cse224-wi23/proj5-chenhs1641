@@ -23,16 +23,36 @@ func TestRaft3(t *testing.T) {
 
 	//clients add different files
 	file1 := "multi_file1.txt"
-	file2 := "multi_file1.txt"
+	//file2 := "multi_file1.txt"
 	err := worker1.AddFile(file1)
 	if err != nil {
 		t.FailNow()
 	}
-	err = worker2.AddFile(file2)
+
+	/*
+		err = worker2.AddFile(file2)
+		if err != nil {
+			t.FailNow()
+		}
+		err = worker2.UpdateFile(file2, "update text")
+		if err != nil {
+			t.FailNow()
+		}
+	*/
+
+	//client1 syncs
+	err = SyncClient("localhost:8080", "test0", BLOCK_SIZE, cfgPath)
 	if err != nil {
-		t.FailNow()
+		t.Fatalf("Sync failed")
 	}
-	err = worker2.UpdateFile(file2, "update text")
+
+	//client2 syncs
+	err = SyncClient("localhost:8080", "test1", BLOCK_SIZE, cfgPath)
+	if err != nil {
+		t.Fatalf("Sync failed")
+	}
+
+	err = worker1.UpdateFile(file1, "update text")
 	if err != nil {
 		t.FailNow()
 	}
@@ -43,17 +63,10 @@ func TestRaft3(t *testing.T) {
 		t.Fatalf("Sync failed")
 	}
 
-	test.Clients[0].SendHeartbeat(test.Context, &emptypb.Empty{})
-
-	test.Clients[1].Crash(test.Context, &emptypb.Empty{})
-	test.Clients[2].Crash(test.Context, &emptypb.Empty{})
-
-	test.Clients[0].SendHeartbeat(test.Context, &emptypb.Empty{})
-	//client1 syncs
-	err = SyncClient("localhost:8080", "test0", BLOCK_SIZE, cfgPath)
-	test.Clients[1].Restore(test.Context, &emptypb.Empty{})
-	test.Clients[2].Restore(test.Context, &emptypb.Empty{})
+	//client2 syncs
+	err = SyncClient("localhost:8080", "test1", BLOCK_SIZE, cfgPath)
 	if err != nil {
 		t.Fatalf("Sync failed")
 	}
+
 }

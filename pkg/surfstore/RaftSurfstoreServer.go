@@ -283,6 +283,8 @@ func (s *RaftSurfstore) AppendEntries(ctx context.Context, input *AppendEntryInp
 		// return output, nil
 	}
 
+	lastNewIndex := -1
+
 	if len(input.Entries) > 0 {
 		//fmt.Println("I'm receiver")
 		//fmt.Println(input.LeaderCommit)
@@ -300,7 +302,7 @@ func (s *RaftSurfstore) AppendEntries(ctx context.Context, input *AppendEntryInp
 		}
 		// 3
 		for idx, existingEntry := range s.log {
-			if existingEntry != input.Entries[idx] {
+			if existingEntry.Term != input.Entries[idx].Term {
 				for idx2 := idx; s.log[idx2] != nil; idx2++ {
 					s.log[idx2] = nil
 					if len(s.log)-1 < idx2+1 {
@@ -311,18 +313,22 @@ func (s *RaftSurfstore) AppendEntries(ctx context.Context, input *AppendEntryInp
 			}
 		}
 		// 4
+		lastNewIndex = len(s.log) - 1
 		for idx := len(s.log); idx < len(input.Entries); idx++ {
 			s.log = append(s.log, input.Entries[idx])
+			lastNewIndex = idx
 		}
 		output.MatchedIndex = int64(len(input.Entries) - 1)
 	}
 
 	// 5
 	if input.LeaderCommit > s.commitIndex {
-		if input.LeaderCommit < input.PrevLogIndex {
+		if lastNewIndex == -1 {
+			s.commitIndex = input.LeaderCommit
+		} else if input.LeaderCommit < int64(lastNewIndex) {
 			s.commitIndex = input.LeaderCommit
 		} else {
-			s.commitIndex = input.PrevLogIndex
+			s.commitIndex = int64(lastNewIndex)
 		}
 		//fmt.Println("now " + s.peers[s.id])
 		//fmt.Println(s.commitIndex)
@@ -330,9 +336,9 @@ func (s *RaftSurfstore) AppendEntries(ctx context.Context, input *AppendEntryInp
 
 	// s.log = input.Entries
 	for s.lastApplied < s.commitIndex {
-		entry := s.log[s.lastApplied+1]
-		s.metaStore.UpdateFile(ctx, entry.FileMetaData)
 		s.lastApplied++
+		entry := s.log[s.lastApplied]
+		s.metaStore.UpdateFile(ctx, entry.FileMetaData)
 	}
 	return output, nil
 }
