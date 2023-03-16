@@ -232,6 +232,8 @@ func SameFile(filename1, filename2 string) (bool, error) {
 	if err2 != nil {
 		return false, err2
 	}
+	//fmt.Println("f1" + string(f1))
+	//fmt.Println("f2" + string(f2))
 
 	return bytes.Equal(f1, f2), nil
 }

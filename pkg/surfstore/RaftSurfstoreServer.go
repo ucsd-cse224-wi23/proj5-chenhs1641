@@ -2,6 +2,7 @@ package surfstore
 
 import (
 	context "context"
+	//"fmt"
 	"google.golang.org/grpc"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	"sync"
@@ -103,6 +104,7 @@ func (s *RaftSurfstore) UpdateFile(ctx context.Context, filemeta *FileMetaData) 
 		return nil, ERR_NOT_LEADER
 	}
 	// append entry to our log
+	//fmt.Println(s.peers[s.id] + string(filemeta.BlockHashList[0]))
 	s.log = append(s.log, &UpdateOperation{
 		Term:         s.term,
 		FileMetaData: filemeta,
@@ -114,12 +116,28 @@ func (s *RaftSurfstore) UpdateFile(ctx context.Context, filemeta *FileMetaData) 
 	// keep trying indefinitely (even after responding) ** rely on sendheartbeat
 
 	// commit the entry once majority of followers have it in their log
-	commit := <-commitChan
-	// once commited, apply to the state machine
-	if commit {
-		s.lastApplied = s.commitIndex
-		return s.metaStore.UpdateFile(ctx, filemeta)
+	totalCommit := 1
+	for {
+		commit := <-commitChan
+		// once commited, apply to the state machine
+		if commit {
+			totalCommit++
+		}
+		if totalCommit > len(s.peers)/2 {
+			s.lastApplied = s.commitIndex
+			//fmt.Println("Yes!")
+			return s.metaStore.UpdateFile(ctx, filemeta)
+			// break
+		}
 	}
+	/*
+		for totalCommit < len(s.peers) {
+			commit := <-commitChan
+			if commit {
+				totalCommit++
+			}
+		}
+	*/
 	return nil, nil
 }
 
@@ -143,6 +161,8 @@ func (s *RaftSurfstore) sendToAllFollowersInParallel(ctx context.Context) {
 		if totalAppends > len(s.peers)/2 {
 			s.commitIndex = newCommitIndex
 			*s.pendingCommits[s.commitIndex] <- true
+			//fmt.Println("I'm leader, and my commit index has been modified to")
+			//fmt.Println(s.commitIndex)
 			break
 		}
 	}
@@ -153,6 +173,7 @@ func (s *RaftSurfstore) sendToAllFollowersInParallel(ctx context.Context) {
 			totalAppends++
 		}
 	}
+	//fmt.Println("Now has sent to all the followers")
 }
 
 func (s *RaftSurfstore) sendToFollower(ctx context.Context, addr string, responses chan bool) {
@@ -163,9 +184,9 @@ func (s *RaftSurfstore) sendToFollower(ctx context.Context, addr string, respons
 		Entries:      s.log,
 		LeaderCommit: s.commitIndex,
 	}
-	realAppendEntryInput.PrevLogIndex = int64(len(s.log) - 1)
+	realAppendEntryInput.PrevLogIndex = int64(len(s.log) - 2)
 	if realAppendEntryInput.PrevLogIndex != -1 {
-		realAppendEntryInput.PrevLogTerm = s.log[len(s.log)-1].Term
+		realAppendEntryInput.PrevLogTerm = s.log[len(s.log)-2].Term
 	}
 	conn, _ := grpc.Dial(addr, grpc.WithInsecure())
 	client := NewRaftSurfstoreClient(conn)
@@ -207,6 +228,9 @@ func (s *RaftSurfstore) AppendEntries(ctx context.Context, input *AppendEntryInp
 	}
 
 	if len(input.Entries) > 0 {
+		//fmt.Println("I'm receiver")
+		//fmt.Println(input.LeaderCommit)
+		//fmt.Println(input.PrevLogIndex)
 		// 1
 		if input.Term < s.term {
 			return output, nil
@@ -215,7 +239,7 @@ func (s *RaftSurfstore) AppendEntries(ctx context.Context, input *AppendEntryInp
 		if len(s.log) < int(input.PrevLogIndex+1) {
 			return output, nil
 		}
-		if s.log[input.PrevLogIndex].Term != input.PrevLogTerm {
+		if input.PrevLogIndex != -1 && s.log[input.PrevLogIndex].Term != input.PrevLogTerm {
 			return output, nil
 		}
 		// 3
@@ -235,14 +259,17 @@ func (s *RaftSurfstore) AppendEntries(ctx context.Context, input *AppendEntryInp
 			s.log = append(s.log, input.Entries[idx])
 		}
 		output.MatchedIndex = int64(len(input.Entries) - 1)
-		// 5
-		if input.LeaderCommit > s.commitIndex {
-			if input.LeaderCommit < output.MatchedIndex {
-				s.commitIndex = input.LeaderCommit
-			} else {
-				s.commitIndex = output.MatchedIndex
-			}
+	}
+
+	// 5
+	if input.LeaderCommit > s.commitIndex {
+		if input.LeaderCommit < input.PrevLogIndex {
+			s.commitIndex = input.LeaderCommit
+		} else {
+			s.commitIndex = input.PrevLogIndex
 		}
+		//fmt.Println("now " + s.peers[s.id])
+		//fmt.Println(s.commitIndex)
 	}
 
 	// s.log = input.Entries
@@ -276,7 +303,11 @@ func (s *RaftSurfstore) SendHeartbeat(ctx context.Context, _ *emptypb.Empty) (*S
 		PrevLogTerm:  -1,
 		PrevLogIndex: -1,
 		Entries:      make([]*UpdateOperation, 0),
-		LeaderCommit: -1,
+		LeaderCommit: s.commitIndex,
+	}
+	if len(s.log) > 0 {
+		dummyAppendEntryInput.PrevLogIndex = int64(len(s.log) - 1)
+		dummyAppendEntryInput.PrevLogTerm = s.log[len(s.log)-1].Term
 	}
 	for idx, addr := range s.peers {
 		if int64(idx) == s.id {

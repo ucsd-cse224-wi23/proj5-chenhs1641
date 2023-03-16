@@ -108,7 +108,7 @@ func ClientSync(client RPCClient) {
 			}
 		}
 	}
-	// PrintMetaMap(localIndex)
+	//PrintMetaMap(localIndex)
 	// below: sync with server
 
 	var blockStoreAddrs []string
@@ -123,7 +123,7 @@ func ClientSync(client RPCClient) {
 	if len(remoteIndex) == 0 {
 		remoteIndex = make(map[string]*FileMetaData)
 	}
-
+	//PrintMetaMap(remoteIndex)
 	for remoteFileName, remoteFileMetaData := range remoteIndex {
 		if localFileMetaData, ok := localIndex[remoteFileName]; ok {
 			if localFileMetaData.Version > remoteFileMetaData.Version {
@@ -223,7 +223,7 @@ func ClientSync(client RPCClient) {
 		}
 	}
 	// below: write to local db
-	// PrintMetaMap(remoteIndex)
+	//PrintMetaMap(remoteIndex)
 	err = WriteMetaFile(localIndex, client.BaseDir)
 	if err != nil {
 		panic(err)
