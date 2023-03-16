@@ -204,7 +204,7 @@ func (s *RaftSurfstore) sendToAllFollowersInParallel(ctx context.Context, commit
 		if int64(idx) == s.id {
 			continue
 		}
-		go s.sendToFollower(ctx, addr, responses)
+		go s.sendToFollower(ctx, idx, addr, responses)
 	}
 	totalAppends := 1
 	newCommitIndex := s.commitIndex + 1
@@ -235,7 +235,7 @@ func (s *RaftSurfstore) sendToAllFollowersInParallel(ctx context.Context, commit
 	//fmt.Println("Now has sent to all the followers")
 }
 
-func (s *RaftSurfstore) sendToFollower(ctx context.Context, addr string, responses chan bool) {
+func (s *RaftSurfstore) sendToFollower(ctx context.Context, idx int, addr string, responses chan bool) {
 	realAppendEntryInput := AppendEntryInput{
 		Term:         s.term,
 		PrevLogTerm:  -1,
@@ -243,17 +243,37 @@ func (s *RaftSurfstore) sendToFollower(ctx context.Context, addr string, respons
 		Entries:      s.log,
 		LeaderCommit: s.commitIndex,
 	}
-	realAppendEntryInput.PrevLogIndex = int64(len(s.log) - 2)
-	if realAppendEntryInput.PrevLogIndex != -1 {
-		realAppendEntryInput.PrevLogTerm = s.log[len(s.log)-2].Term
+	/*
+		realAppendEntryInput.PrevLogIndex = int64(len(s.log) - 2)
+		if realAppendEntryInput.PrevLogIndex != -1 {
+			realAppendEntryInput.PrevLogTerm = s.log[len(s.log)-2].Term
+		}
+	*/
+	realAppendEntryInput.PrevLogIndex = int64(s.nextIndex[idx] - 1)
+	if s.nextIndex[idx]-1 == -1 {
+		realAppendEntryInput.PrevLogTerm = -1
+	} else {
+		realAppendEntryInput.PrevLogTerm = s.log[s.nextIndex[idx]-1].Term
 	}
+
 	conn, _ := grpc.Dial(addr, grpc.WithInsecure())
 	client := NewRaftSurfstoreClient(conn)
 
-	_, err := client.AppendEntries(ctx, &realAppendEntryInput)
+	output, err := client.AppendEntries(ctx, &realAppendEntryInput)
 	conn.Close()
 
 	if err == nil {
+		if output.Success {
+			s.nextIndex[idx] = len(s.log)
+			s.matchIndex[idx] = len(s.log) - 1
+		} else if output.Term > s.term {
+			s.isLeaderMutex.Lock()
+			s.isLeader = false
+			s.term = output.Term
+			s.isLeaderMutex.Unlock()
+		} else {
+			s.nextIndex[idx] = int(output.MatchedIndex) + 1
+		}
 		//fmt.Println("append success and return resp")
 		responses <- true
 	}
@@ -289,7 +309,7 @@ func (s *RaftSurfstore) AppendEntries(ctx context.Context, input *AppendEntryInp
 		// return output, nil
 	}
 
-	lastNewIndex := -1
+	//lastNewIndex := -1
 
 	if len(input.Entries) > 0 {
 		//fmt.Println("I'm receiver")
@@ -300,10 +320,18 @@ func (s *RaftSurfstore) AppendEntries(ctx context.Context, input *AppendEntryInp
 			return output, nil
 		}
 		// 2
+		// have some conflict, to get the last matched index
 		if len(s.log) < int(input.PrevLogIndex+1) {
+			output.MatchedIndex = int64(len(s.log) - 1)
 			return output, nil
 		}
 		if input.PrevLogIndex != -1 && s.log[input.PrevLogIndex].Term != input.PrevLogTerm {
+			for i := input.PrevLogIndex - 1; i >= 0; i-- {
+				if s.log[i].Term != s.log[input.PrevLogIndex].Term {
+					output.MatchedIndex = i
+					break
+				}
+			}
 			return output, nil
 		}
 		// success
@@ -321,22 +349,20 @@ func (s *RaftSurfstore) AppendEntries(ctx context.Context, input *AppendEntryInp
 			}
 		}
 		// 4
-		lastNewIndex = len(s.log) - 1
+		//lastNewIndex = len(s.log) - 1
 		for idx := len(s.log); idx < len(input.Entries); idx++ {
 			s.log = append(s.log, input.Entries[idx])
-			lastNewIndex = idx
+			//lastNewIndex = idx
 		}
 		output.MatchedIndex = int64(len(input.Entries) - 1)
 	}
 
 	// 5
 	if input.LeaderCommit > s.commitIndex {
-		if lastNewIndex == -1 {
-			s.commitIndex = input.LeaderCommit
-		} else if input.LeaderCommit < int64(lastNewIndex) {
+		if input.LeaderCommit < int64(len(s.log))-1 {
 			s.commitIndex = input.LeaderCommit
 		} else {
-			s.commitIndex = int64(lastNewIndex)
+			s.commitIndex = int64(len(s.log)) - 1
 		}
 		//fmt.Println("now " + s.peers[s.id])
 		//fmt.Println(s.commitIndex)
@@ -364,8 +390,8 @@ func (s *RaftSurfstore) SetLeader(ctx context.Context, _ *emptypb.Empty) (*Succe
 	s.matchIndex = make([]int, len(s.peers))
 
 	for idx := range s.peers {
-		s.nextIndex[idx] = len(s.log) - 1
-		s.matchIndex[idx] = -1
+		s.nextIndex[idx] = len(s.log)
+		s.matchIndex[idx] = 0
 	}
 	return &Success{Flag: true}, nil
 }
@@ -393,8 +419,12 @@ func (s *RaftSurfstore) SendHeartbeat(ctx context.Context, _ *emptypb.Empty) (*S
 		if int64(idx) == s.id {
 			continue
 		}
-		//dummyAppendEntryInput.PrevLogIndex = int64(s.nextIndex[idx])
-		//dummyAppendEntryInput.PrevLogTerm = s.log[int(s.nextIndex[idx])].Term
+		dummyAppendEntryInput.PrevLogIndex = int64(s.nextIndex[idx] - 1)
+		if s.nextIndex[idx]-1 == -1 {
+			dummyAppendEntryInput.PrevLogTerm = -1
+		} else {
+			dummyAppendEntryInput.PrevLogTerm = s.log[s.nextIndex[idx]-1].Term
+		}
 		conn, _ := grpc.Dial(addr, grpc.WithInsecure())
 		client := NewRaftSurfstoreClient(conn)
 
@@ -409,7 +439,7 @@ func (s *RaftSurfstore) SendHeartbeat(ctx context.Context, _ *emptypb.Empty) (*S
 				s.term = output.Term
 				s.isLeaderMutex.Unlock()
 			} else {
-				s.nextIndex[idx] = int(output.MatchedIndex)
+				s.nextIndex[idx] = int(output.MatchedIndex) + 1
 			}
 		}
 	}
