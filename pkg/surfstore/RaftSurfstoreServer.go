@@ -163,21 +163,19 @@ func (s *RaftSurfstore) UpdateFile(ctx context.Context, filemeta *FileMetaData) 
 		Term:         s.term,
 		FileMetaData: filemeta,
 	})
+	//lastLogIndex := len(s.log) - 1
 	s.logMutex.Unlock()
 	commitChan := make(chan bool)
+	s.pendingCommits = append(s.pendingCommits, &commitChan)
 	// send entry to all followers in parallel
 	go s.sendToAllFollowersInParallel(ctx, commitChan)
 	// keep trying indefinitely (even after responding) ** rely on sendheartbeat
 
 	// commit the entry once majority of followers have it in their log
-	totalCommit := 1
 	for {
 		commit := <-commitChan
 		// once commited, apply to the state machine
 		if commit {
-			totalCommit++
-		}
-		if totalCommit > len(s.peers)/2 {
 			s.lastApplied = s.commitIndex
 			return s.metaStore.UpdateFile(ctx, filemeta)
 		}
@@ -251,6 +249,7 @@ func (s *RaftSurfstore) sendToFollower(ctx context.Context, idx int, addr string
 		if output.Success {
 			s.nextIndex[idx] = len(s.log)
 			s.matchIndex[idx] = len(s.log) - 1
+			responses <- true
 		} else if output.Term > s.term {
 			s.isLeaderMutex.Lock()
 			s.isLeader = false
@@ -260,7 +259,6 @@ func (s *RaftSurfstore) sendToFollower(ctx context.Context, idx int, addr string
 			s.nextIndex[idx] = int(output.MatchedIndex) + 1
 		}
 		//fmt.Println("append success and return resp")
-		responses <- true
 	}
 }
 
@@ -380,6 +378,7 @@ func (s *RaftSurfstore) SetLeader(ctx context.Context, _ *emptypb.Empty) (*Succe
 		s.nextIndex[idx] = len(s.log)
 		s.matchIndex[idx] = 0
 	}
+	s.pendingCommits = make([]*chan bool, len(s.log))
 	return &Success{Flag: true}, nil
 }
 
@@ -413,6 +412,7 @@ func (s *RaftSurfstore) SendHeartbeat(ctx context.Context, _ *emptypb.Empty) (*S
 			dummyAppendEntryInput.PrevLogTerm = s.log[s.nextIndex[idx]-1].Term
 		}
 		conn, _ := grpc.Dial(addr, grpc.WithInsecure())
+		defer conn.Close()
 		client := NewRaftSurfstoreClient(conn)
 
 		output, err := client.AppendEntries(ctx, &dummyAppendEntryInput)
@@ -427,6 +427,19 @@ func (s *RaftSurfstore) SendHeartbeat(ctx context.Context, _ *emptypb.Empty) (*S
 				s.isLeaderMutex.Unlock()
 			} else {
 				s.nextIndex[idx] = int(output.MatchedIndex) + 1
+			}
+		}
+	}
+	for i := s.commitIndex + 1; i < int64(len(s.log)); i++ {
+		count := 1
+		for idx := range s.peers {
+			if int64(idx) != s.id && s.matchIndex[idx] >= int(i) {
+				count++
+				if count > len(s.peers)/2 {
+					s.commitIndex = i
+					*s.pendingCommits[i] <- true
+					break
+				}
 			}
 		}
 	}
