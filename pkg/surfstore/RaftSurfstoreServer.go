@@ -2,6 +2,7 @@ package surfstore
 
 import (
 	context "context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -37,6 +38,8 @@ type RaftSurfstore struct {
 
 func (s *RaftSurfstore) GetFileInfoMap(ctx context.Context, empty *emptypb.Empty) (*FileInfoMap, error) {
 	// panic("todo")
+	fmt.Println(s.id)
+	fmt.Println("GetFileInfoMap")
 	if s.isCrashed {
 		return nil, ERR_SERVER_CRASHED
 	}
@@ -66,6 +69,8 @@ func (s *RaftSurfstore) GetFileInfoMap(ctx context.Context, empty *emptypb.Empty
 
 func (s *RaftSurfstore) GetBlockStoreMap(ctx context.Context, hashes *BlockHashes) (*BlockStoreMap, error) {
 	// panic("todo")
+	fmt.Println(s.id)
+	fmt.Println("GetBlockStoreMap")
 	if s.isCrashed {
 		return nil, ERR_SERVER_CRASHED
 	}
@@ -95,6 +100,8 @@ func (s *RaftSurfstore) GetBlockStoreMap(ctx context.Context, hashes *BlockHashe
 
 func (s *RaftSurfstore) GetBlockStoreAddrs(ctx context.Context, empty *emptypb.Empty) (*BlockStoreAddrs, error) {
 	// panic("todo")
+	fmt.Println(s.id)
+	fmt.Println("GetBlockStoreAddrs")
 	if s.isCrashed {
 		return nil, ERR_SERVER_CRASHED
 	}
@@ -150,7 +157,8 @@ func (s *RaftSurfstore) checkAlive(addr string, responses chan bool) {
 
 func (s *RaftSurfstore) UpdateFile(ctx context.Context, filemeta *FileMetaData) (*Version, error) {
 	//panic("todo")
-	//fmt.Println("enter update file")
+	fmt.Println(s.id)
+	fmt.Println("UpdateFile")
 	if s.isCrashed {
 		return nil, ERR_SERVER_CRASHED
 	}
@@ -364,6 +372,8 @@ func (s *RaftSurfstore) AppendEntries(ctx context.Context, input *AppendEntryInp
 
 func (s *RaftSurfstore) SetLeader(ctx context.Context, _ *emptypb.Empty) (*Success, error) {
 	//panic("todo")
+	fmt.Println(s.id)
+	fmt.Println("SetLeader")
 	if s.isCrashed {
 		return nil, ERR_SERVER_CRASHED
 	}
@@ -384,6 +394,8 @@ func (s *RaftSurfstore) SetLeader(ctx context.Context, _ *emptypb.Empty) (*Succe
 
 func (s *RaftSurfstore) SendHeartbeat(ctx context.Context, _ *emptypb.Empty) (*Success, error) {
 	//panic("todo")
+	fmt.Println(s.id)
+	fmt.Println("SendHeartbeat")
 	s.isCrashedMutex.RLock()
 	if s.isCrashed {
 		s.isCrashedMutex.RUnlock()
@@ -455,6 +467,8 @@ func (s *RaftSurfstore) SendHeartbeat(ctx context.Context, _ *emptypb.Empty) (*S
 // ========== DO NOT MODIFY BELOW THIS LINE =====================================
 
 func (s *RaftSurfstore) Crash(ctx context.Context, _ *emptypb.Empty) (*Success, error) {
+	fmt.Println(s.id)
+	fmt.Println("Crash")
 	s.isCrashedMutex.Lock()
 	s.isCrashed = true
 	s.isCrashedMutex.Unlock()
@@ -463,6 +477,8 @@ func (s *RaftSurfstore) Crash(ctx context.Context, _ *emptypb.Empty) (*Success, 
 }
 
 func (s *RaftSurfstore) Restore(ctx context.Context, _ *emptypb.Empty) (*Success, error) {
+	fmt.Println(s.id)
+	fmt.Println("Restore")
 	s.isCrashedMutex.Lock()
 	s.isCrashed = false
 	s.isCrashedMutex.Unlock()
