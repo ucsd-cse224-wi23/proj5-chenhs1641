@@ -297,7 +297,6 @@ func (s *RaftSurfstore) AppendEntries(ctx context.Context, input *AppendEntryInp
 		s.isLeader = false
 		s.term = input.Term
 		s.isLeaderMutex.Unlock()
-		// return output, nil
 	}
 
 	//lastNewIndex := -1
@@ -331,20 +330,13 @@ func (s *RaftSurfstore) AppendEntries(ctx context.Context, input *AppendEntryInp
 		// 3
 		for idx, existingEntry := range s.log {
 			if existingEntry.Term != input.Entries[idx].Term {
-				for idx2 := idx; s.log[idx2] != nil; idx2++ {
-					s.log[idx2] = nil
-					if len(s.log)-1 < idx2+1 {
-						break
-					}
-				}
+				s.log = s.log[:idx]
 				break
 			}
 		}
 		// 4
-		//lastNewIndex = len(s.log) - 1
 		for idx := len(s.log); idx < len(input.Entries); idx++ {
 			s.log = append(s.log, input.Entries[idx])
-			//lastNewIndex = idx
 		}
 		s.logMutex.Unlock()
 		output.MatchedIndex = int64(len(input.Entries) - 1)
@@ -386,7 +378,12 @@ func (s *RaftSurfstore) SetLeader(ctx context.Context, _ *emptypb.Empty) (*Succe
 
 	for idx := range s.peers {
 		s.nextIndex[idx] = len(s.log)
-		s.matchIndex[idx] = 0
+		s.matchIndex[idx] = -1
+	}
+	for _, ch := range s.pendingCommits {
+		if *ch != nil {
+			*ch <- false
+		}
 	}
 	s.pendingCommits = make([]*chan bool, len(s.log))
 	return &Success{Flag: true}, nil
@@ -455,6 +452,9 @@ func (s *RaftSurfstore) SendHeartbeat(ctx context.Context, _ *emptypb.Empty) (*S
 				count++
 				if count > len(s.peers)/2 {
 					s.commitIndex = i
+					if *s.pendingCommits[i] == nil {
+						break
+					}
 					*s.pendingCommits[i] <- true
 					break
 				}
