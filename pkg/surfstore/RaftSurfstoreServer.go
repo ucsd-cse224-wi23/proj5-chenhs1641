@@ -412,7 +412,7 @@ func (s *RaftSurfstore) SendHeartbeat(ctx context.Context, _ *emptypb.Empty) (*S
 		Term:         s.term,
 		PrevLogTerm:  -1,
 		PrevLogIndex: -1,
-		Entries:      make([]*UpdateOperation, 0),
+		Entries:      s.log,
 		LeaderCommit: s.commitIndex,
 	}
 	if len(s.log) > 0 {
