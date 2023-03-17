@@ -451,13 +451,16 @@ func (s *RaftSurfstore) SendHeartbeat(ctx context.Context, _ *emptypb.Empty) (*S
 		for idx := range s.peers {
 			if int64(idx) != s.id && s.matchIndex[idx] >= int(i) {
 				count++
-				if count > len(s.peers)/2 && s.log[i].Term == s.term {
-					s.commitIndex = i
+				if count > len(s.peers)/2 {
+					if s.log[i].Term == s.term {
+						s.commitIndex = i
+					}
+					break
 				}
 			}
 		}
 	}
-	for i := lastCommitIndex + 1; i < s.commitIndex; i++ {
+	for i := lastCommitIndex + 1; i <= s.commitIndex; i++ {
 		if s.pendingCommits[i] == nil {
 			break
 		}

@@ -29,7 +29,7 @@ func TestRaft2(t *testing.T) {
 		BlockHashList: make([]string, 0),
 	}
 	go test.Clients[0].UpdateFile(test.Context, in)
-	time.Sleep(1 * time.Second)
+	time.Sleep(100 * time.Millisecond)
 	test.Clients[1].Restore(test.Context, &emptypb.Empty{})
 	test.Clients[2].Restore(test.Context, &emptypb.Empty{})
 	test.Clients[0].SendHeartbeat(test.Context, &emptypb.Empty{})
