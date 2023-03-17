@@ -452,7 +452,7 @@ func (s *RaftSurfstore) SendHeartbeat(ctx context.Context, _ *emptypb.Empty) (*S
 				count++
 				if count > len(s.peers)/2 {
 					s.commitIndex = i
-					if *s.pendingCommits[i] == nil {
+					if s.pendingCommits[i] == nil {
 						break
 					}
 					*s.pendingCommits[i] <- true

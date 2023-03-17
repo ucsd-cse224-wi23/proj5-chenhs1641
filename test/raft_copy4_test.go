@@ -38,6 +38,8 @@ func TestRaft5(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	test.Clients[1].SetLeader(test.Context, &emptypb.Empty{})
 	test.Clients[1].SendHeartbeat(test.Context, &emptypb.Empty{})
+	test.Clients[1].SendHeartbeat(test.Context, &emptypb.Empty{})
+	test.Clients[1].SendHeartbeat(test.Context, &emptypb.Empty{})
 	time.Sleep(1 * time.Second)
 
 	for idx, server := range test.Clients {
