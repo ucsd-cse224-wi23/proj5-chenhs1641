@@ -384,12 +384,18 @@ func (s *RaftSurfstore) SetLeader(ctx context.Context, _ *emptypb.Empty) (*Succe
 
 func (s *RaftSurfstore) SendHeartbeat(ctx context.Context, _ *emptypb.Empty) (*Success, error) {
 	//panic("todo")
+	s.isCrashedMutex.RLock()
 	if s.isCrashed {
+		s.isCrashedMutex.RUnlock()
 		return nil, ERR_SERVER_CRASHED
 	}
+	s.isCrashedMutex.RUnlock()
+	s.isLeaderMutex.RLock()
 	if !s.isLeader {
+		s.isLeaderMutex.RUnlock()
 		return nil, ERR_NOT_LEADER
 	}
+	s.isLeaderMutex.RUnlock()
 	dummyAppendEntryInput := AppendEntryInput{
 		Term:         s.term,
 		PrevLogTerm:  -1,

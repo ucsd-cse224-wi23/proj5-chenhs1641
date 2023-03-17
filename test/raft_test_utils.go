@@ -4,14 +4,15 @@ import (
 	context "context"
 	"cse224/proj5/pkg/surfstore"
 	"fmt"
-	"google.golang.org/grpc"
-	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	"log"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
+
+	"google.golang.org/grpc"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 type TestInfo struct {
